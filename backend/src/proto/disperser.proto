@@ -1,0 +1,110 @@
+// 0G DA Disperser service definition.
+// Mirrors the protobuf contract used by the 0G DA network.
+// Reference: https://github.com/0gfoundation/0g-da-example-rust/blob/main/src/disperser.proto
+
+syntax = "proto3";
+
+package disperser;
+
+// ------------------------------------------------------------------
+// Disperser — primary DA submission and retrieval service
+// ------------------------------------------------------------------
+service Disperser {
+  // Submit a data blob for dispersal across DA nodes.
+  // Returns immediately with a request_id; poll GetBlobStatus for finality.
+  rpc DisperseBlob(DisperseBlobRequest) returns (DisperseBlobReply);
+
+  // Poll the status of a previously submitted blob.
+  rpc GetBlobStatus(BlobStatusRequest) returns (BlobStatusReply);
+
+  // Retrieve a confirmed blob by its batch metadata.
+  rpc RetrieveBlob(RetrieveBlobRequest) returns (RetrieveBlobReply);
+}
+
+// ------------------------------------------------------------------
+// Request / Reply messages
+// ------------------------------------------------------------------
+
+message DisperseBlobRequest {
+  // Raw bytes to disperse (max 32,505,852 bytes per 0G DA spec)
+  bytes data = 1;
+  // Optional custom quorum numbers; leave empty for default quorum
+  repeated uint32 custom_quorum_numbers = 2;
+  // Submitter account identifier (wallet address as string)
+  AccountID account_id = 3;
+}
+
+message AccountID {
+  string account_id = 1;
+}
+
+message DisperseBlobReply {
+  BlobStatus result   = 1;
+  bytes      request_id = 2;   // Opaque ID — store this for polling
+}
+
+message BlobStatusRequest {
+  bytes request_id = 1;
+}
+
+message BlobStatusReply {
+  BlobStatus           status               = 1;
+  SignedBatch          signed_batch         = 2;
+  BlobVerificationProof blob_verification_proof = 3;
+}
+
+message SignedBatch {
+  BatchHeader header      = 1;
+  Attestation attestation = 2;
+}
+
+message BatchHeader {
+  bytes  batch_root                  = 1;
+  bytes  quorum_numbers              = 2;
+  bytes  quorum_signed_percentages   = 3;
+  uint32 reference_block_number      = 4;
+}
+
+message Attestation {
+  repeated bytes  nonsigner_pubkeys = 1;
+  repeated bytes  quorum_apks       = 2;
+  bytes           sigma             = 3;
+  repeated uint32 quorum_ids        = 4;
+}
+
+message BlobVerificationProof {
+  uint32        batch_id              = 1;
+  uint32        blob_index            = 2;
+  BatchMetadata batch_metadata        = 3;
+  bytes         inclusion_proof       = 4;
+  bytes         quorum_indices        = 5;
+}
+
+message BatchMetadata {
+  BatchHeader batch_header             = 1;
+  bytes       signatory_record_hash    = 2;
+  uint32      fee                      = 3;
+  uint32      confirmation_block_number = 4;
+  bytes       batch_header_hash        = 5;
+}
+
+message RetrieveBlobRequest {
+  bytes  batch_header_hash = 1;
+  uint32 blob_index        = 2;
+}
+
+message RetrieveBlobReply {
+  bytes data = 1;
+}
+
+// ------------------------------------------------------------------
+// Enums
+// ------------------------------------------------------------------
+
+enum BlobStatus {
+  UNKNOWN                = 0;
+  PROCESSING             = 1;
+  FAILED                 = 2;
+  FINALIZED              = 3;
+  INSUFFICIENT_SIGNATURES = 4;
+}

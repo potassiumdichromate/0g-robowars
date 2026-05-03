@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: production
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      MONGO_URI: mongodb://mongo:27017/robowars
+      JWT_SECRET: ${JWT_SECRET}
+      # 0G Storage — mainnet (chain ID 16661)
+      ZG_RPC_URL: ${ZG_RPC_URL:-https://evmrpc.0g.ai}
+      ZG_INDEXER_RPC: ${ZG_INDEXER_RPC:-https://indexer-storage-turbo.0g.ai}
+      ZG_PRIVATE_KEY: ${ZG_PRIVATE_KEY}
+      ZG_EXPECTED_REPLICAS: ${ZG_EXPECTED_REPLICAS:-3}
+      ZG_FLOW_CONTRACT: ${ZG_FLOW_CONTRACT:-0x62D4144dB0F0a6fBBaeb6296c785C71B3D57C526}
+      # 0G DA — mainnet (TLS required)
+      ZG_DA_DISPERSER: ${ZG_DA_DISPERSER:-disperser.0g.ai:51001}
+      ZG_DA_TLS: ${ZG_DA_TLS:-true}
+      ZG_DA_POLL_TIMEOUT_MS: ${ZG_DA_POLL_TIMEOUT_MS:-300000}
+      ZG_DA_POLL_INTERVAL_MS: ${ZG_DA_POLL_INTERVAL_MS:-10000}
+      ZG_DA_PAYMENT_CONTRACT: ${ZG_DA_PAYMENT_CONTRACT:-0xA3b15Bd2aD18BFB6b5f92D8AA9F444Dd59d1cE32}
+      # 0G Compute — mainnet router (already mainnet, no change needed)
+      ZG_COMPUTE_API_KEY: ${ZG_COMPUTE_API_KEY}
+      ZG_COMPUTE_BASE_URL: ${ZG_COMPUTE_BASE_URL:-https://router-api.0g.ai/v1}
+      ZG_COMPUTE_MODEL: ${ZG_COMPUTE_MODEL:-zai-org/GLM-5-FP8}
+      ZG_COMPUTE_VERIFY_TEE: ${ZG_COMPUTE_VERIFY_TEE:-true}
+      ZG_COMPUTE_INDEPENDENT_VERIFY: ${ZG_COMPUTE_INDEPENDENT_VERIFY:-true}
+      ZG_COMPUTE_ROUTING: ${ZG_COMPUTE_ROUTING:-latency}
+      ZG_COMPUTE_TIMEOUT_MS: ${ZG_COMPUTE_TIMEOUT_MS:-30000}
+      ZG_COMPUTE_MIN_CONFIDENCE: ${ZG_COMPUTE_MIN_CONFIDENCE:-0.70}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - backend_tmp:/app/tmp
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  backend_tmp:
