@@ -7,6 +7,7 @@ import { uploadRateLimiter } from '../middleware/rateLimiter';
 import { upload, validateSavFile } from '../middleware/fileValidator';
 import { zgStorage } from '../services/ZeroGStorage';
 import { zgDA } from '../services/ZeroGDA';
+import { daQueue } from '../services/DAQueue';
 import { computeService } from '../services/ComputeService';
 import { Save } from '../models/Save';
 import { logger } from '../utils/logger';
@@ -143,7 +144,13 @@ saveRouter.post(
 
       logger.info('Save record created', { walletAddress, version, rootHash, computeStatus });
 
-      // Respond to client — don't block on DA finality
+      // Enqueue DA commitment BEFORE sending the response.
+      // The job is now durable in MongoDB — a server crash between here
+      // and finalization no longer loses the commitment. The DAQueue worker
+      // picks it up on the next poll cycle (or on restart).
+      await daQueue.enqueue(saveDoc._id, rootHash, walletAddress);
+
+      // Respond to client — DA will finalize asynchronously via the queue
       res.status(201).json({
         message: 'Save uploaded successfully',
         version,
@@ -156,21 +163,6 @@ saveRouter.post(
         computeConfidence: computeValidation?.confidence ?? null,
         teeVerified: computeValidation?.teeVerified ?? null,
         saveId: saveDoc._id,
-      });
-
-      // Async DA commitment — runs after response is sent
-      setImmediate(async () => {
-        try {
-          const commitment = await zgDA.publishCommitment(rootHash, walletAddress);
-          await Save.findByIdAndUpdate(saveDoc._id, {
-            daStatus: 'finalized',
-            daCommitment: commitment,
-          });
-          logger.info('DA commitment finalized', { rootHash, batchId: commitment.batchId });
-        } catch (daErr) {
-          await Save.findByIdAndUpdate(saveDoc._id, { daStatus: 'failed' });
-          logger.error('DA commitment failed', { rootHash, err: daErr });
-        }
       });
     } catch (err) {
       logger.error('Save upload failed', { walletAddress, err });

@@ -1,16 +1,19 @@
 # 0G RoboWars — Decentralized Save System Architecture
 
-## Network Configuration (MAINNET)
+## Network Configuration
 
-| Component | Endpoint | Chain ID |
-|-----------|----------|----------|
-| 0G EVM RPC | `https://evmrpc.0g.ai` | 16661 |
-| 0G Storage Indexer (Turbo) | `https://indexer-storage-turbo.0g.ai` | — |
-| 0G DA Disperser | `disperser.0g.ai:51001` (TLS) | — |
-| 0G Compute Router | `https://router-api.0g.ai/v1` | — |
-| Flow Contract | `0x62D4144dB0F0a6fBBaeb6296c785C71B3D57C526` | 16661 |
-| DA Payment Contract | `0xA3b15Bd2aD18BFB6b5f92D8AA9F444Dd59d1cE32` | 16661 |
-| Block Explorer | `https://chainscan.0g.ai` | — |
+| Component | Network | Endpoint | Chain ID |
+|-----------|---------|----------|----------|
+| 0G EVM RPC | **Mainnet** | `https://evmrpc.0g.ai` | 16661 |
+| 0G Storage Indexer (Turbo) | **Mainnet** | `https://indexer-storage-turbo.0g.ai` | — |
+| 0G Compute Router | **Mainnet** | `https://router-api.0g.ai/v1` | — |
+| Compute Payment Contract | **Mainnet** | `0xA3b15Bd2aD18BFB6b5f92D8AA9F444Dd59d1cE32` | 16661 |
+| Flow Contract (Storage) | **Mainnet** | `0x62D4144dB0F0a6fBBaeb6296c785C71B3D57C526` | 16661 |
+| Block Explorer | **Mainnet** | `https://chainscan.0g.ai` | — |
+| 0G DA Disperser | ⚠️ **Testnet only** | `disperser-testnet.0g.ai:51001` | — |
+| DA Entrance Contract | ⚠️ **Testnet only** | `0xE75A073dA5bb7b0eC622170Fd268f35E675a957B` | 16602 |
+
+> **DA Mainnet Status:** As of May 2026, 0G DA does not have published mainnet endpoints or contract addresses in official documentation. All DA integration guide examples reference testnet. The DA layer is in active development. Once 0G Labs publishes mainnet DA, only `ZG_DA_DISPERSER` and `ZG_DA_ENTRANCE_CONTRACT` env vars need updating — no code changes required.
 
 ---
 
@@ -54,7 +57,7 @@
 │  LAYER 1     │   │  LAYER 2 — 0G DA │   │  LAYER 4 — 0G COMPUTE NETWORK   │
 │  0G STORAGE  │   │                  │   │                                  │
 │              │   │  gRPC TLS        │   │  POST router-api.0g.ai/v1/       │
-│  SDK upload: │   │  disperser.0g.ai │   │       chat/completions           │
+│  SDK upload: │   │  disperser-testnet│   │       chat/completions           │
 │  ZgFile →    │   │  :51001          │   │  model: zai-org/GLM-5-FP8        │
 │  merkleTree()│   │                  │   │  verify_tee: true                │
 │  → indexer   │   │  Blob pipeline:  │   │                                  │
@@ -97,7 +100,8 @@
 │          LAYER 5 — ROLLUP INTEGRATION POINTS (Design Only)                  │
 │                                                                             │
 │  OP Stack on 0G DA (mainnet):                                               │
-│  • op-batcher → 0G DA disperser.0g.ai:51001                                │
+│  • op-batcher → 0G DA (testnet: disperser-testnet.0g.ai:51001;             │
+│    mainnet endpoint TBD by 0G Labs)                                         │
 │  • alt_da.da_commitment_type = "GenericCommitment"                          │
 │  • Game state rootHashes embedded in L2 batch data                         │
 │  • L2 contract: SaveCommitted(wallet, rootHash, version) event             │
@@ -127,7 +131,7 @@
 
 | Dimension | 0G DA (mainnet) | Ethereum Calldata | Ethereum EIP-4844 Blob |
 |---|---|---|---|
-| **Cost** | Minimal — BLOB_PRICE denominated in 0G tokens | ~$0.50–$5 per save | ~$0.01–$0.10 per blob |
+| **Cost** | Minimal — BLOB_PRICE on testnet; mainnet pricing TBD by 0G Labs | ~$0.50–$5 per save | ~$0.01–$0.10 per blob |
 | **Throughput** | 32 MB blob, high TPS | 128 KB calldata | 128 KB blob, 6 per block |
 | **Availability guarantee** | BLS aggregation from >2/3 of DA nodes | Ethereum node consensus | Same as Ethereum |
 | **Sampling** | PoDA every 30 blocks (~1.5 min on mainnet) | N/A | DAS (future) |
@@ -189,11 +193,100 @@ saves:
 
 **High-frequency saves**: upload rate limiter (5/min). Client-side debounce: compare local SHA-256 to `CachedMetadata.Checksum` before uploading.
 
-**DA async path**: finalization (~2–5 min on mainnet) runs in `setImmediate`. Client polls `daStatus` before leaderboard submission.
+**DA async path**: finalization (~2–5 min on mainnet) is handled by the durable `DAQueue` (MongoDB-backed). The queue survives server restarts — jobs left in `pending` are recovered on next boot. Client polls `daStatus` before leaderboard submission.
 
 **Compute cost**: GLM-5-FP8 at 100B neuron/prompt token. A typical validation call (350 prompt tokens + 80 completion tokens) ≈ **$0.00006**. At 10,000 validations/day ≈ **$0.60/day**.
 
 **Replicas**: `ZG_EXPECTED_REPLICAS=3` on mainnet. The SDK selects nodes via the turbo indexer. Segment-level retries are handled internally.
+
+---
+
+## Gas & DA Cost Scaling
+
+The current architecture posts one DA blob per save. At low volume this is fine, but at scale (>10K saves/day) the unoptimized cost profile looks like:
+
+| Volume | Raw DA blobs/day | Problem |
+|--------|-----------------|---------|
+| 1K saves/day | 1K blobs | Fine — trivial cost |
+| 10K saves/day | 10K blobs | DA submission queue starts to back-pressure |
+| 100K saves/day | 100K blobs | Unsustainable without batching |
+
+Three scaling strategies, in order of implementation difficulty:
+
+### Strategy 1 — Compression (Quick Win, ~30–60% size reduction)
+
+Gzip the rootHash+wallet+ts payload before dispersing:
+
+```typescript
+// In ZeroGDA.publishCommitment():
+import { gzipSync } from 'zlib';
+const blobData = gzipSync(Buffer.from(payload, 'utf-8'));
+```
+
+Smaller blobs → cheaper DA costs. Each blob is already tiny (JSON metadata, <200 bytes), but this matters at scale when many blobs hit the same batch.
+
+### Strategy 2 — Batch Commitment (Medium complexity, ~100x cost reduction)
+
+Instead of one blob per save, aggregate multiple rootHashes into a single DA blob:
+
+```
+DABatch blob = {
+  gameId: "robowars",
+  blockHeight: 8204512,
+  commitments: [
+    { wallet: "0xabc...", rootHash: "0x9f86...", version: 3, ts: 1746700000 },
+    { wallet: "0xdef...", rootHash: "0x1a2b...", version: 7, ts: 1746700001 },
+    ... up to ~1000 entries per blob
+  ]
+}
+```
+
+**Implementation changes:**
+- `DAQueue` accumulates jobs for up to N seconds (batch window: 30s) or until M jobs are queued (batch size: 100)
+- Single `DisperseBlob` call for the whole window
+- `daCommitment` in MongoDB stores `{ batchId, blobIndex, commitmentIndex }` — the position of this wallet's entry within the batched blob
+- Verification: re-fetch the blob, parse the JSON array, find the entry by wallet+rootHash
+
+**Cost impact:** 100 saves per blob → 100× cheaper per save.
+
+### Strategy 3 — Rollup-First Strategy (High complexity, maximum scalability)
+
+Instead of individual DA blobs, embed rootHashes in L2 batch data:
+
+```
+OP Stack sequencer batch (posted to 0G DA) already contains:
+  → All L2 transactions for that block window
+  → Game actions that reference rootHashes
+
+L2 smart contract:
+  event SaveCommitted(address indexed wallet, bytes32 rootHash, uint32 version);
+
+Flow:
+  Player action (L2 tx) → SaveCommitted event → batch → 0G DA → finalized
+```
+
+**Why this is better at scale:**
+- Zero per-save DA cost — rootHashes piggyback on existing L2 batch data
+- DA finalization is the same for all saves in the same L2 block (~same latency)
+- Leaderboard verification becomes an L2 event query instead of a DA blob parse
+- Full rollup fraud-proof guarantees apply
+
+**When to adopt this:**
+- When save volume exceeds 50K/day
+- When the game already has an L2 deployment for in-game assets or NFTs
+- When you want on-chain leaderboard finality without per-entry gas costs
+
+### Current system vs scaled system
+
+| Dimension | Current (v1) | Batch DA | Rollup-First |
+|---|---|---|---|
+| DA blobs per 1K saves | 1,000 | ~10 | 0 (bundled in L2) |
+| Per-save DA cost | $X | $X / 100 | ~$0 marginal |
+| Verification complexity | Medium | Medium | Low (event query) |
+| Implementation effort | Done ✓ | 1 sprint | 2–3 sprints |
+| Required infra | Current | Current | L2 deployment |
+
+**Recommended path:** ship v1 (current), add compression immediately (1 hour of work), add batch commitment when daily saves exceed 5K, consider rollup-first when L2 is on the roadmap.
 
 ---
 
@@ -216,8 +309,11 @@ node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 # 5. Fund Compute Router account
 #    pc.0g.ai → Dashboard → Deposit
 
-# 6. Run a 0G DA client node pointed at mainnet disperser.0g.ai:51001
-#    https://docs.0g.ai/developer-hub/building-on-0g/da-integration
+# 6. Run a 0G DA client node (currently testnet only)
+#    Disperser: disperser-testnet.0g.ai:51001
+#    DA entrance contract (Galileo testnet): 0xE75A073dA5bb7b0eC622170Fd268f35E675a957B
+#    Mainnet DA: check https://docs.0g.ai/developer-hub/building-on-0g/da-integration
+#                or ask in https://discord.gg/0glabs for mainnet timeline
 
 # 7. Start all services
 docker compose up -d

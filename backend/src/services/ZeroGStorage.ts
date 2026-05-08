@@ -32,13 +32,17 @@ export class ZeroGStorage {
 
   constructor() {
     const provider = new ethers.JsonRpcProvider(config.ZG_RPC_URL);
-    this.signer = new ethers.Wallet(config.ZG_PRIVATE_KEY, provider);
+    // Uses the dedicated storage key (ZG_STORAGE_PRIVATE_KEY) so the storage
+    // signer's blast radius is limited to Flow contract transactions only.
+    // Falls back to ZG_PRIVATE_KEY if no dedicated key is configured.
+    this.signer = new ethers.Wallet(config.ZG_STORAGE_PRIVATE_KEY, provider);
     this.indexer = new Indexer(config.ZG_INDEXER_RPC);
 
     logger.info('ZeroGStorage initialized', {
       rpc: config.ZG_RPC_URL,
       indexer: config.ZG_INDEXER_RPC,
-      wallet: this.signer.address,
+      storageWallet: this.signer.address,
+      usingDedicatedKey: !!process.env['ZG_STORAGE_PRIVATE_KEY'],
     });
   }
 

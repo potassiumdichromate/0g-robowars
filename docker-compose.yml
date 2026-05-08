@@ -16,14 +16,17 @@ services:
       ZG_RPC_URL: ${ZG_RPC_URL:-https://evmrpc.0g.ai}
       ZG_INDEXER_RPC: ${ZG_INDEXER_RPC:-https://indexer-storage-turbo.0g.ai}
       ZG_PRIVATE_KEY: ${ZG_PRIVATE_KEY}
+      # Dedicated storage signer — set to a separate funded wallet for blast-radius isolation.
+      # Falls back to ZG_PRIVATE_KEY if not provided (backward-compatible).
+      ZG_STORAGE_PRIVATE_KEY: ${ZG_STORAGE_PRIVATE_KEY:-}
       ZG_EXPECTED_REPLICAS: ${ZG_EXPECTED_REPLICAS:-3}
       ZG_FLOW_CONTRACT: ${ZG_FLOW_CONTRACT:-0x62D4144dB0F0a6fBBaeb6296c785C71B3D57C526}
-      # 0G DA — mainnet (TLS required)
-      ZG_DA_DISPERSER: ${ZG_DA_DISPERSER:-disperser.0g.ai:51001}
-      ZG_DA_TLS: ${ZG_DA_TLS:-true}
-      ZG_DA_POLL_TIMEOUT_MS: ${ZG_DA_POLL_TIMEOUT_MS:-300000}
-      ZG_DA_POLL_INTERVAL_MS: ${ZG_DA_POLL_INTERVAL_MS:-10000}
-      ZG_DA_PAYMENT_CONTRACT: ${ZG_DA_PAYMENT_CONTRACT:-0xA3b15Bd2aD18BFB6b5f92D8AA9F444Dd59d1cE32}
+      # 0G DA — testnet only (mainnet DA not yet published as of May 2026)
+      ZG_DA_DISPERSER: ${ZG_DA_DISPERSER:-disperser-testnet.0g.ai:51001}
+      ZG_DA_TLS: ${ZG_DA_TLS:-false}
+      ZG_DA_POLL_TIMEOUT_MS: ${ZG_DA_POLL_TIMEOUT_MS:-120000}
+      ZG_DA_POLL_INTERVAL_MS: ${ZG_DA_POLL_INTERVAL_MS:-5000}
+      ZG_DA_ENTRANCE_CONTRACT: ${ZG_DA_ENTRANCE_CONTRACT:-0xE75A073dA5bb7b0eC622170Fd268f35E675a957B}
       # 0G Compute — mainnet router (already mainnet, no change needed)
       ZG_COMPUTE_API_KEY: ${ZG_COMPUTE_API_KEY}
       ZG_COMPUTE_BASE_URL: ${ZG_COMPUTE_BASE_URL:-https://router-api.0g.ai/v1}

@@ -26,12 +26,29 @@ export const config = {
     'ZG_INDEXER_RPC',
     'https://indexer-storage-turbo.0g.ai'
   ),
+
+  // ── Key separation ─────────────────────────────────────────────────────────
+  // ZG_PRIVATE_KEY  : primary key — used for auth wallet recovery (ethers.verifyMessage),
+  //                   on-chain lookups, and as the default fallback signer.
+  // ZG_STORAGE_PRIVATE_KEY : dedicated storage upload key — signs 0G Flow contract
+  //                   transactions for file uploads. Separate so a compromised
+  //                   storage key cannot be used for auth/compute operations.
+  //                   If not set, falls back to ZG_PRIVATE_KEY (backward-compatible).
+  //
+  // Recommended production setup:
+  //   ZG_PRIVATE_KEY          = cold wallet, minimal on-chain permissions
+  //   ZG_STORAGE_PRIVATE_KEY  = hot wallet, funded only for storage gas fees
   ZG_PRIVATE_KEY: required('ZG_PRIVATE_KEY'),
+  ZG_STORAGE_PRIVATE_KEY:
+    process.env['ZG_STORAGE_PRIVATE_KEY'] ?? process.env['ZG_PRIVATE_KEY']!,
+
   ZG_EXPECTED_REPLICAS: parseInt(optional('ZG_EXPECTED_REPLICAS', '3'), 10),
 
-  // 0G DA — mainnet
-  ZG_DA_DISPERSER: optional('ZG_DA_DISPERSER', 'disperser.0g.ai:51001'),
-  ZG_DA_TLS: optional('ZG_DA_TLS', 'true') === 'true',
+  // 0G DA — testnet (Galileo) only as of May 2026
+  // Mainnet DA is under active development; no official mainnet disperser endpoint
+  // has been published. Switch this default once 0G Labs publishes mainnet DA docs.
+  ZG_DA_DISPERSER: optional('ZG_DA_DISPERSER', 'disperser-testnet.0g.ai:51001'),
+  ZG_DA_TLS: optional('ZG_DA_TLS', 'false') === 'true',
   ZG_DA_POLL_TIMEOUT_MS: parseInt(optional('ZG_DA_POLL_TIMEOUT_MS', '120000'), 10),
   ZG_DA_POLL_INTERVAL_MS: parseInt(optional('ZG_DA_POLL_INTERVAL_MS', '5000'), 10),
 

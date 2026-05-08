@@ -12,6 +12,7 @@ import { globalRateLimiter } from './middleware/rateLimiter';
 import { authRouter } from './routes/authRoutes';
 import { saveRouter } from './routes/saveRoutes';
 import { leaderboardRouter } from './routes/leaderboardRoutes';
+import { daQueue } from './services/DAQueue';
 
 const app = express();
 
@@ -74,6 +75,12 @@ async function start(): Promise<void> {
     serverSelectionTimeoutMS: 5000,
   });
   logger.info('MongoDB connected', { uri: config.MONGO_URI });
+
+  // Start the DA commitment queue worker.
+  // Must start AFTER MongoDB is connected — it polls the DAJob collection.
+  // On restart, the first tick immediately recovers any jobs left in 'pending'
+  // or stale 'processing' state from a previous crash.
+  daQueue.start();
 
   // Start HTTP server
   app.listen(config.PORT, () => {

@@ -414,7 +414,7 @@ Unauthenticated liveness check.
   "version": "1.0.0",
   "network": {
     "storage": "https://indexer-storage-turbo.0g.ai",
-    "da": "disperser.0g.ai:51001"
+    "da": "disperser-testnet.0g.ai:51001"
   },
   "uptime": 3842.1
 }

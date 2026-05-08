@@ -7,6 +7,29 @@
  *
  * ── Trust Model ────────────────────────────────────────────────────────────────
  *
+ * IMPORTANT — Layer 4 (Compute) has three possible trust states:
+ *
+ *   'cryptographic'  TEE hardware attested + independently verified via EIP-191
+ *                    signature against the on-chain teeSignerAddress.
+ *                    This is the strongest guarantee. Forgery requires breaking
+ *                    both the TEE hardware root of trust AND the 0G chain state.
+ *
+ *   'heuristic'      The Router reported tee_verified=true, but our independent
+ *                    EIP-191 sig check failed or was skipped (e.g. provider URL
+ *                    unreachable, ZG_COMPUTE_INDEPENDENT_VERIFY=false).
+ *                    This requires trusting the Router as an honest intermediary.
+ *                    Acceptable for dev/staging; not recommended for mainnet
+ *                    leaderboards with real economic stakes.
+ *
+ *   'none'           No compute validation was run or it failed entirely.
+ *                    The verdict covers only layers 1–3 (storage + DA integrity).
+ *                    Verdict degrades to COMPUTE_PENDING.
+ *
+ * Product messaging guidance:
+ *   - Show 'cryptographic' as "TEE Verified ✓" in UI
+ *   - Show 'heuristic'     as "Router Attested" (amber)
+ *   - Show 'none'          as "Pending Validation" (grey)
+ *
  * Attack surface → mitigation:
  *
  *  1. Upload modified .sav with same rootHash
@@ -49,11 +72,28 @@ import { logger } from '../utils/logger';
 
 export type VerificationVerdict = 'CLEAN' | 'TAMPERED' | 'UNVERIFIED' | 'DA_PENDING' | 'COMPUTE_PENDING';
 
+/**
+ * trustLevel — the strength of the Layer 4 compute attestation.
+ *
+ *  'cryptographic' — TEE hardware attested + EIP-191 sig independently verified
+ *                    against on-chain teeSignerAddress. Highest assurance.
+ *  'heuristic'     — Router reported tee_verified=true but independent sig check
+ *                    failed or was disabled. Requires trusting the Router.
+ *  'none'          — No compute validation ran or it errored entirely.
+ */
+export type ComputeTrustLevel = 'cryptographic' | 'heuristic' | 'none';
+
 export interface VerificationReport {
   walletAddress: string;
   rootHash: string;
   version: number;
   verdict: VerificationVerdict;
+  /**
+   * Describes the trust model backing the Layer 4 compute result.
+   * Use this for product messaging — do NOT collapse it to a boolean.
+   * See the trust model comment at the top of this file.
+   */
+  trustLevel: ComputeTrustLevel;
   checks: {
     rootHashKnown: boolean;
     daCommitmentPresent: boolean;
@@ -89,6 +129,7 @@ export class AntiCheatService {
       rootHash,
       version: -1,
       verdict: 'UNVERIFIED',
+      trustLevel: 'none',
       checks: {
         rootHashKnown: false,
         daCommitmentPresent: false,
@@ -202,6 +243,19 @@ export class AntiCheatService {
       }
       report.verdict = 'COMPUTE_PENDING';
       return report;
+    }
+
+    // ── Compute trust level ─────────────────────────────────────────────────────
+    // Derive trustLevel from the compute result for product messaging.
+    if (report.checks.computeTeeVerified && report.checks.computeIndependentlyVerified) {
+      // Both Router AND our own EIP-191 sig check passed → hardware root of trust
+      report.trustLevel = 'cryptographic';
+    } else if (report.checks.computeTeeVerified) {
+      // Router says tee_verified but we couldn't independently confirm → trust Router
+      report.trustLevel = 'heuristic';
+    } else {
+      // No TEE claim at all, or no compute ran
+      report.trustLevel = 'none';
     }
 
     // ── Final verdict: all four layers must pass ────────────────────────────────
