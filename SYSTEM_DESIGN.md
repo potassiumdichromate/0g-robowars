@@ -96,21 +96,9 @@
 │  • nonces.expiresAt TTL — auto-delete expired nonces                      │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│          LAYER 5 — ROLLUP INTEGRATION POINTS (Design Only)                  │
-│                                                                             │
-│  OP Stack on 0G DA (mainnet):                                               │
-│  • op-batcher → 0G DA (testnet: disperser-testnet.0g.ai:51001;             │
-│    mainnet endpoint TBD by 0G Labs)                                         │
-│  • alt_da.da_commitment_type = "GenericCommitment"                          │
-│  • Game state rootHashes embedded in L2 batch data                         │
-│  • L2 contract: SaveCommitted(wallet, rootHash, version) event             │
-│                                                                             │
-│  Arbitrum Nitro on 0G DA:                                                   │
-│  • Sequencer inbox batches → 0G DA (replaces AnyTrust DAC)                 │
-│  • Disputed scores trigger fraud proofs replaying DA-stored .sav files     │
-└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+> **Layer 5 (Rollup Integration)** is a future design only — OP Stack and Arbitrum Nitro paths are documented in [`docs/future-scaling.md`](docs/future-scaling.md).
 
 ---
 
@@ -198,95 +186,6 @@ saves:
 **Compute cost**: GLM-5-FP8 at 100B neuron/prompt token. A typical validation call (350 prompt tokens + 80 completion tokens) ≈ **$0.00006**. At 10,000 validations/day ≈ **$0.60/day**.
 
 **Replicas**: `ZG_EXPECTED_REPLICAS=3` on mainnet. The SDK selects nodes via the turbo indexer. Segment-level retries are handled internally.
-
----
-
-## Gas & DA Cost Scaling
-
-The current architecture posts one DA blob per save. At low volume this is fine, but at scale (>10K saves/day) the unoptimized cost profile looks like:
-
-| Volume | Raw DA blobs/day | Problem |
-|--------|-----------------|---------|
-| 1K saves/day | 1K blobs | Fine — trivial cost |
-| 10K saves/day | 10K blobs | DA submission queue starts to back-pressure |
-| 100K saves/day | 100K blobs | Unsustainable without batching |
-
-Three scaling strategies, in order of implementation difficulty:
-
-### Strategy 1 — Compression (Quick Win, ~30–60% size reduction)
-
-Gzip the rootHash+wallet+ts payload before dispersing:
-
-```typescript
-// In ZeroGDA.publishCommitment():
-import { gzipSync } from 'zlib';
-const blobData = gzipSync(Buffer.from(payload, 'utf-8'));
-```
-
-Smaller blobs → cheaper DA costs. Each blob is already tiny (JSON metadata, <200 bytes), but this matters at scale when many blobs hit the same batch.
-
-### Strategy 2 — Batch Commitment (Medium complexity, ~100x cost reduction)
-
-Instead of one blob per save, aggregate multiple rootHashes into a single DA blob:
-
-```
-DABatch blob = {
-  gameId: "robowars",
-  blockHeight: 8204512,
-  commitments: [
-    { wallet: "0xabc...", rootHash: "0x9f86...", version: 3, ts: 1746700000 },
-    { wallet: "0xdef...", rootHash: "0x1a2b...", version: 7, ts: 1746700001 },
-    ... up to ~1000 entries per blob
-  ]
-}
-```
-
-**Implementation changes:**
-- `DAQueue` accumulates jobs for up to N seconds (batch window: 30s) or until M jobs are queued (batch size: 100)
-- Single `DisperseBlob` call for the whole window
-- `daCommitment` in MongoDB stores `{ batchId, blobIndex, commitmentIndex }` — the position of this wallet's entry within the batched blob
-- Verification: re-fetch the blob, parse the JSON array, find the entry by wallet+rootHash
-
-**Cost impact:** 100 saves per blob → 100× cheaper per save.
-
-### Strategy 3 — Rollup-First Strategy (High complexity, maximum scalability)
-
-Instead of individual DA blobs, embed rootHashes in L2 batch data:
-
-```
-OP Stack sequencer batch (posted to 0G DA) already contains:
-  → All L2 transactions for that block window
-  → Game actions that reference rootHashes
-
-L2 smart contract:
-  event SaveCommitted(address indexed wallet, bytes32 rootHash, uint32 version);
-
-Flow:
-  Player action (L2 tx) → SaveCommitted event → batch → 0G DA → finalized
-```
-
-**Why this is better at scale:**
-- Zero per-save DA cost — rootHashes piggyback on existing L2 batch data
-- DA finalization is the same for all saves in the same L2 block (~same latency)
-- Leaderboard verification becomes an L2 event query instead of a DA blob parse
-- Full rollup fraud-proof guarantees apply
-
-**When to adopt this:**
-- When save volume exceeds 50K/day
-- When the game already has an L2 deployment for in-game assets or NFTs
-- When you want on-chain leaderboard finality without per-entry gas costs
-
-### Current system vs scaled system
-
-| Dimension | Current (v1) | Batch DA | Rollup-First |
-|---|---|---|---|
-| DA blobs per 1K saves | 1,000 | ~10 | 0 (bundled in L2) |
-| Per-save DA cost | $X | $X / 100 | ~$0 marginal |
-| Verification complexity | Medium | Medium | Low (event query) |
-| Implementation effort | Done ✓ | 1 sprint | 2–3 sprints |
-| Required infra | Current | Current | L2 deployment |
-
-**Recommended path:** ship v1 (current), add compression immediately (1 hour of work), add batch commitment when daily saves exceed 5K, consider rollup-first when L2 is on the roadmap.
 
 ---
 
