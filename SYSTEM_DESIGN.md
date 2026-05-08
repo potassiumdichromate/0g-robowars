@@ -13,9 +13,6 @@
 | 0G DA Disperser | ⚠️ **Testnet only** | `disperser-testnet.0g.ai:51001` | — |
 | DA Entrance Contract | ⚠️ **Testnet only** | `0xE75A073dA5bb7b0eC622170Fd268f35E675a957B` | 16602 |
 
-> **DA Mainnet Status:** As of May 2026, 0G DA does not have published mainnet endpoints or contract addresses in official documentation. All DA integration guide examples reference testnet. The DA layer is in active development. Once 0G Labs publishes mainnet DA, only `ZG_DA_DISPERSER` and `ZG_DA_ENTRANCE_CONTRACT` env vars need updating — no code changes required.
-
----
 
 ## System Architecture Diagram
 
